@@ -71,7 +71,8 @@ STATE_VERSION = 2
 
 
 def reboot():
-    Popen(["systemctl", "reboot"])
+    #Popen(["systemctl", "reboot"])
+    pass
 
 
 def get_url_from_os_release():
