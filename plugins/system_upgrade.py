@@ -37,6 +37,8 @@ import dnf.cli
 from dnf.cli import CliError
 from dnf.i18n import ucd
 import dnf.transaction
+from dnf.transaction_sr import serialize_transaction, TransactionReplay
+
 
 import libdnf.conf
 
@@ -64,6 +66,8 @@ DOWNLOAD_FINISHED_MSG = _(  # Translators: do not change "reboot" here
     "To remove cached metadata and transaction use 'dnf {command} clean'")
 CANT_RESET_RELEASEVER = _(
     "Sorry, you need to use 'download --releasever' instead of '--network'")
+
+TRANSACTION_FILE = '/var/lib/dnf/system-upgrade.json'
 
 STATE_VERSION = 2
 
@@ -351,7 +355,7 @@ class SystemUpgradeCommand(dnf.cli.Command):
 
     def __init__(self, cli):
         super(SystemUpgradeCommand, self).__init__(cli)
-        self.state = State()
+        #self.state = State()
 
     @staticmethod
     def set_argparser(parser):
@@ -368,8 +372,8 @@ class SystemUpgradeCommand(dnf.cli.Command):
         journal.send(message,
                      MESSAGE_ID=message_id,
                      PRIORITY=journal.LOG_NOTICE,
-                     SYSTEM_RELEASEVER=self.state.system_releasever,
-                     TARGET_RELEASEVER=self.state.target_releasever,
+                     #SYSTEM_RELEASEVER=self.state.system_releasever,
+                     #TARGET_RELEASEVER=self.state.target_releasever,
                      DNF_VERSION=dnf.const.VERSION)
 
     def pre_configure(self):
@@ -393,16 +397,17 @@ class SystemUpgradeCommand(dnf.cli.Command):
         if callable(subfunc):
             subfunc()
 
-    def _check_state_version(self, command):
-        if self.state.state_version != STATE_VERSION:
-            msg = _("Incompatible version of data. Rerun 'dnf {command} download [OPTIONS]'"
-                    "").format(command=command)
-            raise CliError(msg)
+#    def _check_state_version(self, command):
+#        if self.state.state_version != STATE_VERSION:
+#            msg = _("Incompatible version of data. Rerun 'dnf {command} download [OPTIONS]'"
+#                    "").format(command=command)
+#            raise CliError(msg)
 
     def _set_cachedir(self):
         # set download directories from json state file
         self.base.conf.cachedir = DEFAULT_DATADIR
-        self.base.conf.destdir = self.state.destdir if self.state.destdir else None
+        #self.base.conf.destdir = self.state.destdir if self.state.destdir else None
+        self.base.conf.destdir = None
 
     def _get_forward_reverse_pkg_reason_pairs(self):
         """
@@ -441,9 +446,10 @@ class SystemUpgradeCommand(dnf.cli.Command):
 
     def pre_configure_upgrade(self):
         self._set_cachedir()
-        if self.state.enable_disable_repos:
-            self.opts.repos_ed = self.state.enable_disable_repos
-        self.base.conf.releasever = self.state.target_releasever
+        self.replay = TransactionReplay(self.base, TRANSACTION_FILE)
+        #if self.state.enable_disable_repos:
+        #    self.opts.repos_ed = self.state.enable_disable_repos
+        self.base.conf.releasever = self.replay.get_data()["target_releasever"]
 
     def pre_configure_clean(self):
         self._set_cachedir()
@@ -489,22 +495,22 @@ class SystemUpgradeCommand(dnf.cli.Command):
         self.cli.demands.available_repos = True
         self.cli.demands.sack_activation = True
         # use the saved value for --allowerasing, etc.
-        self.opts.distro_sync = self.state.distro_sync
-        self.cli.demands.allow_erasing = self.state.allow_erasing
-        if self.state.gpgcheck is not None:
-            self.base.conf.gpgcheck = self.state.gpgcheck
-        if self.state.gpgcheck_repos is not None:
-            for repo in self.base.repos.values():
-                repo.gpgcheck = repo.id in self.state.gpgcheck_repos
-        if self.state.repo_gpgcheck_repos is not None:
-            for repo in self.base.repos.values():
-                repo.repo_gpgcheck = repo.id in self.state.repo_gpgcheck_repos
-        self.base.conf.best = self.state.best
-        if self.state.exclude is None:
-            self.state.exclude = []
-        self.base.conf.exclude = libdnf.conf.VectorString(self.state.exclude)
-        self.base.conf.install_weak_deps = self.state.install_weak_deps
-        self.base.conf.module_platform_id = self.state.module_platform_id
+        #self.opts.distro_sync = self.state.distro_sync
+        #self.cli.demands.allow_erasing = self.state.allow_erasing
+        #if self.state.gpgcheck is not None:
+        #    self.base.conf.gpgcheck = self.state.gpgcheck
+        #if self.state.gpgcheck_repos is not None:
+        #    for repo in self.base.repos.values():
+        #        repo.gpgcheck = repo.id in self.state.gpgcheck_repos
+        #if self.state.repo_gpgcheck_repos is not None:
+        #    for repo in self.base.repos.values():
+        #        repo.repo_gpgcheck = repo.id in self.state.repo_gpgcheck_repos
+        #self.base.conf.best = self.state.best
+        #if self.state.exclude is None:
+        #    self.state.exclude = []
+        #self.base.conf.exclude = libdnf.conf.VectorString(self.state.exclude)
+        #self.base.conf.install_weak_deps = self.state.install_weak_deps
+        #self.base.conf.module_platform_id = self.state.module_platform_id
         # don't try to get new metadata, 'cuz we're offline
         self.cli.demands.cacheonly = True
         # and don't ask any questions (we confirmed all this beforehand)
@@ -523,13 +529,13 @@ class SystemUpgradeCommand(dnf.cli.Command):
     # == check_*: do any action-specific checks ===============================
 
     def check_reboot(self):
-        if not self.state.download_status == 'complete':
-            raise CliError(_("system is not ready for upgrade"))
-        self._check_state_version(self.opts.command)
-        if self.state.upgrade_command != self.opts.command:
-            msg = _("the transaction was not prepared for '{command}'. "
-                    "Rerun 'dnf {command} download [OPTIONS]'").format(command=self.opts.command)
-            raise CliError(msg)
+        #if not self.state.download_status == 'complete':
+        #    raise CliError(_("system is not ready for upgrade"))
+        ##self._check_state_version(self.opts.command)
+        #if self.state.upgrade_command != self.opts.command:
+        #    msg = _("the transaction was not prepared for '{command}'. "
+        #            "Rerun 'dnf {command} download [OPTIONS]'").format(command=self.opts.command)
+        #    raise CliError(msg)
         if os.path.lexists(MAGIC_SYMLINK):
             raise CliError(_("upgrade is already scheduled"))
         dnf.util.ensure_dir(DEFAULT_DATADIR)
@@ -544,13 +550,13 @@ class SystemUpgradeCommand(dnf.cli.Command):
             raise SystemExit(0)
         # Delete symlink ASAP to avoid reboot loops
         dnf.yum.misc.unlink_f(MAGIC_SYMLINK)
-        command = self.state.upgrade_command
-        if not command:
-            command = self.opts.command
-        self._check_state_version(command)
-        if not self.state.upgrade_status == 'ready':
-            msg = _("use 'dnf {command} reboot' to begin the upgrade").format(command=command)
-            raise CliError(msg)
+        #command = self.state.upgrade_command
+        #if not command:
+        #    command = self.opts.command
+        ##self._check_state_version(command)
+        #if not self.state.upgrade_status == 'ready':
+        #    msg = _("use 'dnf {command} reboot' to begin the upgrade").format(command=command)
+        #    raise CliError(msg)
 
     # == run_*: run the action/prep the transaction ===========================
 
@@ -558,8 +564,8 @@ class SystemUpgradeCommand(dnf.cli.Command):
         # make the magic symlink
         os.symlink(DEFAULT_DATADIR, MAGIC_SYMLINK)
         # set upgrade_status so that the upgrade can run
-        with self.state as state:
-            state.upgrade_status = 'ready'
+        #with self.state as state:
+        #    state.upgrade_status = 'ready'
 
     def run_reboot(self):
         self.run_prepare()
@@ -578,18 +584,18 @@ class SystemUpgradeCommand(dnf.cli.Command):
         else:
             self.base.upgrade_all()
 
-        with self.state as state:
-            state.download_status = 'downloading'
-            state.target_releasever = self.base.conf.releasever
-            state.exclude = list(self.base.conf.exclude)
-            state.destdir = self.base.conf.destdir
+        #with self.state as state:
+        #    state.download_status = 'downloading'
+        #    state.target_releasever = self.base.conf.releasever
+        #    state.exclude = list(self.base.conf.exclude)
+        #    state.destdir = self.base.conf.destdir
 
     def run_upgrade(self):
         # change the upgrade status (so we can detect crashed upgrades later)
         command = ''
-        with self.state as state:
-            state.upgrade_status = 'incomplete'
-            command = state.upgrade_command
+        #with self.state as state:
+        #    state.upgrade_status = 'incomplete'
+        #    command = state.upgrade_command
         if command == 'offline-upgrade':
             msg = _("Starting offline upgrade. This will take a while.")
         elif command == 'offline-distrosync':
@@ -621,41 +627,52 @@ class SystemUpgradeCommand(dnf.cli.Command):
 
         # add the downloaded RPMs to the sack
 
-        errs = []
+        self.replay = TransactionReplay(
+            self.base,
+            TRANSACTION_FILE,
+#            ignore_installed = self.opts.ignore_installed,
+#            ignore_extras = self.opts.ignore_extras,
+#            skip_missing = self.opts.skip_missing,
+#            latest_versions = self.opts.latest_versions
+        )
 
-        for pkgspec in self.state.remove_packages.keys():
-            try:
-                self.base.remove(pkgspec)
-            except dnf.exceptions.MarkingError:
-                msg = _('Unable to match package: %s')
-                logger.info(msg, self.base.output.term.bold(pkgspec))
-                errs.append(pkgspec)
+        self.replay.run()
 
-        for repo_id, pkg_spec_dict in self.state.install_packages.items():
-            for pkgspec in pkg_spec_dict.keys():
-                try:
-                    self.base.install(pkgspec, reponame=repo_id)
-                except dnf.exceptions.MarkingError:
-                    msg = _('Unable to match package: %s')
-                    logger.info(msg, self.base.output.term.bold(pkgspec + " " + repo_id))
-                    errs.append(pkgspec)
+        #errs = []
 
-        if errs:
-            raise dnf.exceptions.MarkingError(_("Unable to match some of packages"))
+        #for pkgspec in self.state.remove_packages.keys():
+        #    try:
+        #        self.base.remove(pkgspec)
+        #    except dnf.exceptions.MarkingError:
+        #        msg = _('Unable to match package: %s')
+        #        logger.info(msg, self.base.output.term.bold(pkgspec))
+        #        errs.append(pkgspec)
+
+        #for repo_id, pkg_spec_dict in self.state.install_packages.items():
+        #    for pkgspec in pkg_spec_dict.keys():
+        #        try:
+        #            self.base.install(pkgspec, reponame=repo_id)
+        #        except dnf.exceptions.MarkingError:
+        #            msg = _('Unable to match package: %s')
+        #            logger.info(msg, self.base.output.term.bold(pkgspec + " " + repo_id))
+        #            errs.append(pkgspec)
+
+        #if errs:
+        #    raise dnf.exceptions.MarkingError(_("Unable to match some of packages"))
 
     def run_clean(self):
         logger.info(_("Cleaning up downloaded data..."))
         clear_dir(self.base.conf.cachedir)
         if self.base.conf.destdir:
             clear_dir(self.base.conf.destdir)
-        with self.state as state:
-            state.download_status = None
-            state.state_version = None
-            state.upgrade_status = None
-            state.upgrade_command = None
-            state.destdir = None
-            state.install_packages = {}
-            state.remove_packages = []
+        #with self.state as state:
+        #    state.download_status = None
+        #    state.state_version = None
+        #    state.upgrade_status = None
+        #    state.upgrade_command = None
+        #    state.destdir = None
+        #    state.install_packages = {}
+        #    state.remove_packages = []
 
     def run_log(self):
         if self.opts.number:
@@ -667,59 +684,82 @@ class SystemUpgradeCommand(dnf.cli.Command):
 
     def resolved_upgrade(self):
         """Adjust transaction reasons according to stored values"""
-        if not self.cli.base.transaction:
-            return
-        backward_action = set(dnf.transaction.BACKWARD_ACTIONS + \
-                              [libdnf.transaction.TransactionItemAction_REINSTALLED])
-        forward_actions = set(dnf.transaction.FORWARD_ACTIONS)
+        self.replay.post_transaction()
 
-        install_packages = self.state.install_packages
-        remove_packages = self.state.remove_packages
-        for tsi in self.cli.base.transaction:
-            if tsi.action in forward_actions:
-                pkg = tsi.pkg
-                try:
-                    stored_reason = install_packages[pkg.repo.id][str(pkg)][str(tsi.action)]
-                    if stored_reason != tsi.reason:
-                        tsi.reason = stored_reason
-                except KeyError:
-                    pass
-            elif tsi.action in backward_action:
-                pkg = tsi.pkg
-                try:
-                    stored_reason = remove_packages[str(pkg)][str(tsi.action)]
-                    if stored_reason != tsi.reason:
-                        tsi.reason = stored_reason
-                except KeyError:
-                    pass
+#        if not self.cli.base.transaction:
+#            return
+#
+#        backward_action = set(dnf.transaction.BACKWARD_ACTIONS + \
+#                              [libdnf.transaction.TransactionItemAction_REINSTALLED])
+#        forward_actions = set(dnf.transaction.FORWARD_ACTIONS)
+#
+        #install_packages = self.state.install_packages
+        #remove_packages = self.state.remove_packages
+        #for tsi in self.cli.base.transaction:
+        #    if tsi.action in forward_actions:
+        #        pkg = tsi.pkg
+        #        try:
+        #            stored_reason = install_packages[pkg.repo.id][str(pkg)][str(tsi.action)]
+        #            if stored_reason != tsi.reason:
+        #                tsi.reason = stored_reason
+        #        except KeyError:
+        #            pass
+        #    elif tsi.action in backward_action:
+        #        pkg = tsi.pkg
+        #        try:
+        #            stored_reason = remove_packages[str(pkg)][str(tsi.action)]
+        #            if stored_reason != tsi.reason:
+        #                tsi.reason = stored_reason
+        #        except KeyError:
+        #            pass
 
     # == transaction_*: do stuff after a successful transaction ===============
 
     def transaction_download(self):
-        install_packages, remove_packages = self._get_forward_reverse_pkg_reason_pairs()
+        #install_packages, remove_packages = self._get_forward_reverse_pkg_reason_pairs()
+
+        system_ver = dnf.rpm.detect_releasever(self.base.conf.installroot)
+
+        add = {
+            "target_releasever": self.base.conf.releasever,
+            "system_releasever": system_ver,
+        }
+
+
+        data = serialize_transaction(self.base.history.get_current())
+        data.update(add)
+        try:
+            with open(TRANSACTION_FILE, "w") as f:
+                json.dump(data, f, indent=4, sort_keys=True)
+                f.write("\n")
+
+            print(_("Transaction saved to {}.").format(TRANSACTION_FILE))
+
+        except OSError as e:
+            raise dnf.cli.CliError(_('Error storing transaction: {}').format(str(e)))
+
 
         # Okay! Write out the state so the upgrade can use it.
-        system_ver = dnf.rpm.detect_releasever(self.base.conf.installroot)
-        with self.state as state:
-            state.download_status = 'complete'
-            state.state_version = STATE_VERSION
-            state.distro_sync = self.opts.distro_sync
-            state.allow_erasing = self.cli.demands.allow_erasing
-            state.gpgcheck = self.base.conf.gpgcheck
-            state.gpgcheck_repos = [
-                repo.id for repo in self.base.repos.values() if repo.gpgcheck]
-            state.repo_gpgcheck_repos = [
-                repo.id for repo in self.base.repos.values() if repo.repo_gpgcheck]
-            state.best = self.base.conf.best
-            state.system_releasever = system_ver
-            state.target_releasever = self.base.conf.releasever
-            state.install_packages = install_packages
-            state.remove_packages = remove_packages
-            state.install_weak_deps = self.base.conf.install_weak_deps
-            state.module_platform_id = self.base.conf.module_platform_id
-            state.enable_disable_repos = self.opts.repos_ed
-            state.destdir = self.base.conf.destdir
-            state.upgrade_command = self.opts.command
+        #with self.state as state:
+        #    state.download_status = 'complete'
+        #    state.state_version = STATE_VERSION
+        #    state.distro_sync = self.opts.distro_sync
+        #    state.allow_erasing = self.cli.demands.allow_erasing
+        #    state.gpgcheck = self.base.conf.gpgcheck
+        #    state.gpgcheck_repos = [
+        #        repo.id for repo in self.base.repos.values() if repo.gpgcheck]
+        #    state.repo_gpgcheck_repos = [
+        #        repo.id for repo in self.base.repos.values() if repo.repo_gpgcheck]
+        #    state.best = self.base.conf.best
+        #    state.system_releasever = system_ver
+        #    state.target_releasever = self.base.conf.releasever
+        #    state.install_packages = install_packages
+        #    state.remove_packages = remove_packages
+        #    state.install_weak_deps = self.base.conf.install_weak_deps
+        #    state.module_platform_id = self.base.conf.module_platform_id
+        #    state.enable_disable_repos = self.opts.repos_ed
+        #    state.destdir = self.base.conf.destdir
+        #    state.upgrade_command = self.opts.command
         msg = DOWNLOAD_FINISHED_MSG.format(command=self.opts.command)
         logger.info(msg)
         self.log_status(_("Download finished."),
